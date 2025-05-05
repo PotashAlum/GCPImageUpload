@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Header, Request
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Dict
+from datetime import datetime, timedelta
 import uuid
 import os
 import logging
@@ -71,7 +71,6 @@ app.add_middleware(
 # Environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "user-images-bucket")
-DEFAULT_API_KEYS = os.getenv("API_KEYS", "test-key-1,test-key-2").split(",")
 ROOT_API_KEY = os.getenv("ROOT_API_KEY", "root-admin-key")
 
 # Database connection
@@ -214,49 +213,6 @@ async def startup_db_client():
     await users_collection.create_index("email", unique=True)
     await teams_collection.create_index("name", unique=True)
     await api_keys_collection.create_index("key", unique=True)
-    
-    # Insert default API keys if they don't exist
-    for i, default_key in enumerate(DEFAULT_API_KEYS):
-        existing_key = await api_keys_collection.find_one({"key": default_key})
-        if not existing_key:
-            app_logger.info(f"Creating default API key {i+1}")
-            
-            # First, ensure there's a default team
-            default_team = await teams_collection.find_one({"name": "Default Team"})
-            if not default_team:
-                team_id = str(uuid.uuid4())
-                await teams_collection.insert_one({
-                    "id": team_id,
-                    "name": "Default Team",
-                    "description": "Default team created on startup",
-                    "created_at": datetime.now()
-                })
-                default_team = await teams_collection.find_one({"name": "Default Team"})
-            
-            # Next, ensure there's a default user
-            default_user = await users_collection.find_one({"username": f"default_user_{i+1}"})
-            if not default_user:
-                user_id = str(uuid.uuid4())
-                await users_collection.insert_one({
-                    "id": user_id,
-                    "username": f"default_user_{i+1}",
-                    "email": f"default{i+1}@example.com",
-                    "full_name": f"Default User {i+1}",
-                    "team_id": default_team["id"],
-                    "created_at": datetime.now()
-                })
-                default_user = await users_collection.find_one({"username": f"default_user_{i+1}"})
-            
-            # Finally, insert the API key
-            await api_keys_collection.insert_one({
-                "id": str(uuid.uuid4()),
-                "user_id": default_user["id"],
-                "name": f"Default API Key {i+1}",
-                "key": default_key,
-                "created_at": datetime.now(),
-                "expires_at": datetime.now() + timedelta(days=365),
-                "is_active": True
-            })
     
     app_logger.info("Database setup completed")
 
@@ -971,136 +927,6 @@ async def list_audit_logs(
     # Get logs
     logs = await audit_logs_collection.find(query).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
     return logs
-
-# Routes to maintain backward compatibility
-@app.post("/users/{user_id}/images/", response_model=Image, status_code=201)
-async def upload_user_image(
-    user_id: str,
-    title: Optional[str] = None,
-    description: Optional[str] = None,
-    tags: Optional[str] = None,
-    file: UploadFile = File(...),
-    auth: Dict = Depends(authenticate_api_key)
-):
-    # Check permissions
-    if not auth["is_root"] and auth["user_id"] != user_id:
-        raise HTTPException(
-            status_code=403, 
-            detail="You don't have permission to upload images for this user"
-        )
-    
-    # Get user to find their team
-    user = await users_collection.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Upload to the user's team
-    return await upload_team_image(
-        team_id=user["team_id"],
-        title=title,
-        description=description,
-        tags=tags,
-        file=file,
-        auth=auth
-    )
-
-@app.get("/users/{user_id}/images/", response_model=List[Image])
-async def list_user_images(
-    user_id: str,
-    skip: int = 0,
-    limit: int = 10,
-    auth: Dict = Depends(authenticate_api_key)
-):
-    # Check permissions
-    if not auth["is_root"] and auth["user_id"] != user_id:
-        raise HTTPException(
-            status_code=403, 
-            detail="You don't have permission to view images for this user"
-        )
-    
-    # Get user to find their team
-    user = await users_collection.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Get images uploaded by this specific user
-    images = await images_collection.find({"user_id": user_id}).skip(skip).limit(limit).to_list(limit)
-    return images
-
-@app.get("/users/{user_id}/images/{image_id}", response_model=Image)
-async def get_user_image(
-    user_id: str,
-    image_id: str,
-    auth: Dict = Depends(authenticate_api_key)
-):
-    # Get the specific image
-    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
-    if not image:
-        raise HTTPException(status_code=404, detail="Image not found")
-    
-    # Check permissions
-    if not auth["is_root"] and auth["user_id"] != user_id and auth["team_id"] != image["team_id"]:
-        raise HTTPException(
-            status_code=403, 
-            detail="You don't have permission to view this image"
-        )
-    
-    app_logger.info(f"Image {image_id} viewed by user {auth['user_id']}")
-    return image
-
-@app.put("/users/{user_id}/images/{image_id}", response_model=Image)
-async def update_user_image(
-    user_id: str,
-    image_id: str,
-    image_update: ImageBase,
-    tags: Optional[str] = None,
-    auth: Dict = Depends(authenticate_api_key)
-):
-    # Find the image
-    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
-    if not image:
-        raise HTTPException(status_code=404, detail="Image not found")
-    
-    # Check permissions
-    if not auth["is_root"] and auth["user_id"] != user_id:
-        raise HTTPException(
-            status_code=403, 
-            detail="You don't have permission to update this image"
-        )
-    
-    # Update via the team endpoint
-    return await update_team_image(
-        team_id=image["team_id"],
-        image_id=image_id,
-        image_update=image_update,
-        tags=tags,
-        auth=auth
-    )
-
-@app.delete("/users/{user_id}/images/{image_id}", status_code=204)
-async def delete_user_image(
-    user_id: str,
-    image_id: str,
-    auth: Dict = Depends(authenticate_api_key)
-):
-    # Find the image
-    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
-    if not image:
-        raise HTTPException(status_code=404, detail="Image not found")
-    
-    # Check permissions
-    if not auth["is_root"] and auth["user_id"] != user_id:
-        raise HTTPException(
-            status_code=403, 
-            detail="You don't have permission to delete this image"
-        )
-    
-    # Delete via the team endpoint
-    return await delete_team_image(
-        team_id=image["team_id"],
-        image_id=image_id,
-        auth=auth
-    )
 
 if __name__ == "__main__":
     import uvicorn

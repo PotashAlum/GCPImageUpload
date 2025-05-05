@@ -21,7 +21,6 @@ services:
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/user_image_db
       - GCS_BUCKET_NAME=user-images-bucket
-      - API_KEYS=test-key-1,test-key-2
       - ROOT_API_KEY=admin-root-key
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-credentials.json
     volumes:
