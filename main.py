@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from models import (
     User, UserBase, 
     Team, TeamBase, TeamCreate,
+    APIKey, APIKeyBase, APIKeyCreate, 
     Image, ImageBase, ImageCreate, ImageMetadata,
     AuditLog
 )
@@ -70,12 +71,15 @@ app.add_middleware(
 # Environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "user-images-bucket")
+DEFAULT_API_KEYS = os.getenv("API_KEYS", "test-key-1,test-key-2").split(",")
+ROOT_API_KEY = os.getenv("ROOT_API_KEY", "root-admin-key")
 
 # Database connection
 client = AsyncIOMotorClient(MONGODB_URI)
 db = client.user_image_db
 users_collection = db.users
 teams_collection = db.teams
+api_keys_collection = db.api_keys
 images_collection = db.images
 audit_logs_collection = db.audit_logs
 
@@ -100,9 +104,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
         
         response = await call_next(request)
         
+        # Get user ID from API key if possible
+        user_id = None
+        if api_key:
+            api_key_doc = await api_keys_collection.find_one({"key": api_key})
+            if api_key_doc:
+                user_id = api_key_doc["user_id"]
+        
         # Create audit log entry
         log_entry = {
             "id": str(uuid.uuid4()),
+            "user_id": user_id,
             "action": method,
             "resource_type": path.split("/")[1] if len(path.split("/")) > 1 else "root",
             "resource_id": path.split("/")[2] if len(path.split("/")) > 2 else None,
@@ -128,6 +140,60 @@ class AuditMiddleware(BaseHTTPMiddleware):
 # Add audit middleware
 app.add_middleware(AuditMiddleware)
 
+# Helper for authenticating API keys
+async def authenticate_api_key(api_key: str = Depends(api_key_header)):
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key is missing",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    
+    # Check if it's the root API key
+    if api_key == ROOT_API_KEY:
+        app_logger.info("Root API key used for authentication")
+        return {"is_root": True, "user_id": None, "team_id": None}
+    
+    # Check if it's a valid user API key
+    api_key_doc = await api_keys_collection.find_one({
+        "key": api_key,
+        "is_active": True,
+    })
+    
+    if not api_key_doc:
+        app_logger.warning(f"Invalid API key attempt: {api_key[:5]}...")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    
+    # Check if the API key has expired
+    if api_key_doc.get("expires_at") and api_key_doc["expires_at"] < datetime.now():
+        app_logger.warning(f"Expired API key used: {api_key[:5]}...")
+        raise HTTPException(
+            status_code=401,
+            detail="API key has expired",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    
+    # Get user info
+    user = await users_collection.find_one({"id": api_key_doc["user_id"]})
+    if not user:
+        app_logger.error(f"API key associated with non-existent user: {api_key_doc['user_id']}")
+        raise HTTPException(
+            status_code=401,
+            detail="User associated with API key not found",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    
+    return {
+        "is_root": False,
+        "user_id": user["id"],
+        "team_id": user["team_id"],
+        "api_key_id": api_key_doc["id"]
+    }
+
 # Helper function to check team membership and permissions
 async def verify_team_access(user_id: str, team_id: str):
     user = await users_collection.find_one({"id": user_id})
@@ -147,6 +213,50 @@ async def startup_db_client():
     await users_collection.create_index("username", unique=True)
     await users_collection.create_index("email", unique=True)
     await teams_collection.create_index("name", unique=True)
+    await api_keys_collection.create_index("key", unique=True)
+    
+    # Insert default API keys if they don't exist
+    for i, default_key in enumerate(DEFAULT_API_KEYS):
+        existing_key = await api_keys_collection.find_one({"key": default_key})
+        if not existing_key:
+            app_logger.info(f"Creating default API key {i+1}")
+            
+            # First, ensure there's a default team
+            default_team = await teams_collection.find_one({"name": "Default Team"})
+            if not default_team:
+                team_id = str(uuid.uuid4())
+                await teams_collection.insert_one({
+                    "id": team_id,
+                    "name": "Default Team",
+                    "description": "Default team created on startup",
+                    "created_at": datetime.now()
+                })
+                default_team = await teams_collection.find_one({"name": "Default Team"})
+            
+            # Next, ensure there's a default user
+            default_user = await users_collection.find_one({"username": f"default_user_{i+1}"})
+            if not default_user:
+                user_id = str(uuid.uuid4())
+                await users_collection.insert_one({
+                    "id": user_id,
+                    "username": f"default_user_{i+1}",
+                    "email": f"default{i+1}@example.com",
+                    "full_name": f"Default User {i+1}",
+                    "team_id": default_team["id"],
+                    "created_at": datetime.now()
+                })
+                default_user = await users_collection.find_one({"username": f"default_user_{i+1}"})
+            
+            # Finally, insert the API key
+            await api_keys_collection.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": default_user["id"],
+                "name": f"Default API Key {i+1}",
+                "key": default_key,
+                "created_at": datetime.now(),
+                "expires_at": datetime.now() + timedelta(days=365),
+                "is_active": True
+            })
     
     app_logger.info("Database setup completed")
 
@@ -158,7 +268,7 @@ async def shutdown_db_client():
 
 # CRUD operations for Teams
 @app.post("/teams/", response_model=Team, status_code=201)
-async def create_team(team: TeamCreate):
+async def create_team(team: TeamCreate, auth: Dict = Depends(authenticate_api_key)):
     app_logger.info(f"Creating new team: {team.name}")
     
     # Check if team name already exists
@@ -180,7 +290,11 @@ async def create_team(team: TeamCreate):
     return {**team_db}
 
 @app.get("/teams/{team_id}", response_model=Team)
-async def get_team(team_id: str):
+async def get_team(team_id: str, auth: Dict = Depends(authenticate_api_key)):
+    # Root or team member can access
+    if not auth["is_root"]:
+        await verify_team_access(auth["user_id"], team_id)
+    
     team = await teams_collection.find_one({"id": team_id})
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -190,16 +304,35 @@ async def get_team(team_id: str):
 @app.get("/teams/", response_model=List[Team])
 async def list_teams(
     skip: int = 0, 
-    limit: int = 10
+    limit: int = 10, 
+    auth: Dict = Depends(authenticate_api_key)
 ):
-    teams = await teams_collection.find().skip(skip).limit(limit).to_list(limit)
-    return teams
+    # If root, show all teams
+    if auth["is_root"]:
+        teams = await teams_collection.find().skip(skip).limit(limit).to_list(limit)
+        return teams
+    
+    # Otherwise, just show the user's team
+    user = await users_collection.find_one({"id": auth["user_id"]})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    team = await teams_collection.find_one({"id": user["team_id"]})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    return [team]
 
 @app.put("/teams/{team_id}", response_model=Team)
 async def update_team(
     team_id: str, 
-    team: TeamBase
-):    
+    team: TeamBase, 
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Only root can update teams
+    if not auth["is_root"]:
+        raise HTTPException(status_code=403, detail="Only administrators can update teams")
+    
     existing_team = await teams_collection.find_one({"id": team_id})
     if not existing_team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -221,7 +354,11 @@ async def update_team(
     return updated_team
 
 @app.delete("/teams/{team_id}", status_code=204)
-async def delete_team(team_id: str):
+async def delete_team(team_id: str, auth: Dict = Depends(authenticate_api_key)):
+    # Only root can delete teams
+    if not auth["is_root"]:
+        raise HTTPException(status_code=403, detail="Only administrators can delete teams")
+    
     # Check if team exists
     team = await teams_collection.find_one({"id": team_id})
     if not team:
@@ -256,7 +393,8 @@ async def delete_team(team_id: str):
 # CRUD operations for Users
 @app.post("/users/", response_model=User, status_code=201)
 async def create_user(
-    user: UserBase
+    user: UserBase, 
+    auth: Dict = Depends(authenticate_api_key)
 ):
     app_logger.info(f"Creating new user: {user.username}")
     
@@ -290,10 +428,17 @@ async def create_user(
     return {**user_db}
 
 @app.get("/users/{user_id}", response_model=User)
-async def get_user(user_id: str):
+async def get_user(user_id: str, auth: Dict = Depends(authenticate_api_key)):
     user = await users_collection.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if requester has permission to access this user
+    if not auth["is_root"] and auth["user_id"] != user_id and auth["team_id"] != user["team_id"]:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to access this user"
+        )
     
     return user
 
@@ -301,20 +446,41 @@ async def get_user(user_id: str):
 async def list_users(
     skip: int = 0, 
     limit: int = 10, 
-    team_id: Optional[str] = None
+    team_id: Optional[str] = None, 
+    auth: Dict = Depends(authenticate_api_key)
 ):
     # Build query
-    users = await users_collection.find({"team_id": team_id}).skip(skip).limit(limit).to_list(limit)
+    query = {}
+    
+    # If team_id is provided, filter by team
+    if team_id:
+        # Verify access to the team
+        if not auth["is_root"]:
+            await verify_team_access(auth["user_id"], team_id)
+        query["team_id"] = team_id
+    elif not auth["is_root"]:
+        # Non-root users can only see users in their team
+        query["team_id"] = auth["team_id"]
+    
+    users = await users_collection.find(query).skip(skip).limit(limit).to_list(limit)
     return users
 
 @app.put("/users/{user_id}", response_model=User)
 async def update_user(
     user_id: str, 
-    user: UserBase
+    user: UserBase, 
+    auth: Dict = Depends(authenticate_api_key)
 ):
     existing_user = await users_collection.find_one({"id": user_id})
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to update this user"
+        )
     
     # Update user fields
     update_data = user.dict(exclude_unset=True)
@@ -353,7 +519,14 @@ async def update_user(
     return updated_user
 
 @app.delete("/users/{user_id}", status_code=204)
-async def delete_user(user_id: str):
+async def delete_user(user_id: str, auth: Dict = Depends(authenticate_api_key)):
+    # Only root or the user themselves can delete their account
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to delete this user"
+        )
+    
     # Check if user exists
     existing_user = await users_collection.find_one({"id": user_id})
     if not existing_user:
@@ -380,6 +553,159 @@ async def delete_user(user_id: str):
     
     return None
 
+# CRUD operations for API Keys
+@app.post("/users/{user_id}/api-keys/", response_model=APIKey, status_code=201)
+async def create_api_key(
+    user_id: str,
+    api_key: APIKeyCreate,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to create API keys for this user"
+        )
+    
+    # Check if user exists
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Generate new API key
+    api_key_id = str(uuid.uuid4())
+    api_key_value = f"sk_{secrets.token_urlsafe(32)}"
+    created_at = datetime.now()
+    
+    api_key_db = {
+        "id": api_key_id,
+        "user_id": user_id,
+        "name": api_key.name,
+        "key": api_key_value,
+        "created_at": created_at,
+        "expires_at": api_key.expires_at,
+        "is_active": True
+    }
+    
+    await api_keys_collection.insert_one(api_key_db)
+    app_logger.info(f"Created new API key {api_key_id} for user {user_id}")
+    
+    return {**api_key_db}
+
+@app.get("/users/{user_id}/api-keys/", response_model=List[APIKey])
+async def list_user_api_keys(
+    user_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to view API keys for this user"
+        )
+    
+    # Check if user exists
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user's API keys
+    api_keys = await api_keys_collection.find({"user_id": user_id}).to_list(None)
+    return api_keys
+
+@app.get("/users/{user_id}/api-keys/{api_key_id}", response_model=APIKey)
+async def get_api_key(
+    user_id: str,
+    api_key_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to view this API key"
+        )
+    
+    # Check if user exists
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get the specific API key
+    api_key = await api_keys_collection.find_one({"id": api_key_id, "user_id": user_id})
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    return api_key
+
+@app.put("/users/{user_id}/api-keys/{api_key_id}", response_model=APIKey)
+async def update_api_key(
+    user_id: str,
+    api_key_id: str,
+    api_key_update: APIKeyBase,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to update this API key"
+        )
+    
+    # Check if user exists
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Find the API key
+    api_key = await api_keys_collection.find_one({"id": api_key_id, "user_id": user_id})
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    # Update API key metadata
+    update_data = api_key_update.dict(exclude_unset=True)
+    
+    await api_keys_collection.update_one(
+        {"id": api_key_id, "user_id": user_id},
+        {"$set": update_data}
+    )
+    
+    updated_api_key = await api_keys_collection.find_one({"id": api_key_id, "user_id": user_id})
+    return updated_api_key
+
+@app.delete("/users/{user_id}/api-keys/{api_key_id}", status_code=204)
+async def delete_api_key(
+    user_id: str,
+    api_key_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions: either it's your own account, or you're an admin
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to delete this API key"
+        )
+    
+    # Check if user exists
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Make sure not deleting the API key currently in use
+    if not auth["is_root"] and auth["api_key_id"] == api_key_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete the API key currently in use"
+        )
+    
+    # Delete from database
+    delete_result = await api_keys_collection.delete_one({"id": api_key_id, "user_id": user_id})
+    if delete_result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    app_logger.info(f"Deleted API key {api_key_id} for user {user_id}")
+    return None
+
 # Image operations with team ownership
 @app.post("/teams/{team_id}/images/", response_model=Image, status_code=201)
 async def upload_team_image(
@@ -387,8 +713,13 @@ async def upload_team_image(
     title: Optional[str] = None,
     description: Optional[str] = None,
     tags: Optional[str] = None,  # Comma-separated list of tags
-    file: UploadFile = File(...)
-):    
+    file: UploadFile = File(...),
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check if user has access to this team
+    if not auth["is_root"]:
+        await verify_team_access(auth["user_id"], team_id)
+    
     # Verify team exists
     team = await teams_collection.find_one({"id": team_id})
     if not team:
@@ -478,8 +809,13 @@ async def upload_team_image(
 async def list_team_images(
     team_id: str,
     skip: int = 0,
-    limit: int = 10
-):    
+    limit: int = 10,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check if user has access to this team
+    if not auth["is_root"]:
+        await verify_team_access(auth["user_id"], team_id)
+    
     # Verify team exists
     team = await teams_collection.find_one({"id": team_id})
     if not team:
@@ -492,8 +828,13 @@ async def list_team_images(
 @app.get("/teams/{team_id}/images/{image_id}", response_model=Image)
 async def get_team_image(
     team_id: str,
-    image_id: str
-):  
+    image_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check if user has access to this team
+    if not auth["is_root"]:
+        await verify_team_access(auth["user_id"], team_id)
+    
     # Verify team exists
     team = await teams_collection.find_one({"id": team_id})
     if not team:
@@ -504,7 +845,7 @@ async def get_team_image(
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     
-    app_logger.info(f"Image {image_id} viewed")
+    app_logger.info(f"Image {image_id} viewed by user {auth['user_id']}")
     return image
 
 @app.put("/teams/{team_id}/images/{image_id}", response_model=Image)
@@ -512,8 +853,13 @@ async def update_team_image(
     team_id: str,
     image_id: str,
     image_update: ImageBase,
-    tags: Optional[str] = None
+    tags: Optional[str] = None,
+    auth: Dict = Depends(authenticate_api_key)
 ):
+    # Check if user has access to this team
+    if not auth["is_root"]:
+        await verify_team_access(auth["user_id"], team_id)
+    
     # Verify team exists
     team = await teams_collection.find_one({"id": team_id})
     if not team:
@@ -625,6 +971,136 @@ async def list_audit_logs(
     # Get logs
     logs = await audit_logs_collection.find(query).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
     return logs
+
+# Routes to maintain backward compatibility
+@app.post("/users/{user_id}/images/", response_model=Image, status_code=201)
+async def upload_user_image(
+    user_id: str,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    tags: Optional[str] = None,
+    file: UploadFile = File(...),
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to upload images for this user"
+        )
+    
+    # Get user to find their team
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Upload to the user's team
+    return await upload_team_image(
+        team_id=user["team_id"],
+        title=title,
+        description=description,
+        tags=tags,
+        file=file,
+        auth=auth
+    )
+
+@app.get("/users/{user_id}/images/", response_model=List[Image])
+async def list_user_images(
+    user_id: str,
+    skip: int = 0,
+    limit: int = 10,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Check permissions
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to view images for this user"
+        )
+    
+    # Get user to find their team
+    user = await users_collection.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get images uploaded by this specific user
+    images = await images_collection.find({"user_id": user_id}).skip(skip).limit(limit).to_list(limit)
+    return images
+
+@app.get("/users/{user_id}/images/{image_id}", response_model=Image)
+async def get_user_image(
+    user_id: str,
+    image_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Get the specific image
+    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check permissions
+    if not auth["is_root"] and auth["user_id"] != user_id and auth["team_id"] != image["team_id"]:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to view this image"
+        )
+    
+    app_logger.info(f"Image {image_id} viewed by user {auth['user_id']}")
+    return image
+
+@app.put("/users/{user_id}/images/{image_id}", response_model=Image)
+async def update_user_image(
+    user_id: str,
+    image_id: str,
+    image_update: ImageBase,
+    tags: Optional[str] = None,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Find the image
+    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check permissions
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to update this image"
+        )
+    
+    # Update via the team endpoint
+    return await update_team_image(
+        team_id=image["team_id"],
+        image_id=image_id,
+        image_update=image_update,
+        tags=tags,
+        auth=auth
+    )
+
+@app.delete("/users/{user_id}/images/{image_id}", status_code=204)
+async def delete_user_image(
+    user_id: str,
+    image_id: str,
+    auth: Dict = Depends(authenticate_api_key)
+):
+    # Find the image
+    image = await images_collection.find_one({"id": image_id, "user_id": user_id})
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check permissions
+    if not auth["is_root"] and auth["user_id"] != user_id:
+        raise HTTPException(
+            status_code=403, 
+            detail="You don't have permission to delete this image"
+        )
+    
+    # Delete via the team endpoint
+    return await delete_team_image(
+        team_id=image["team_id"],
+        image_id=image_id,
+        auth=auth
+    )
 
 if __name__ == "__main__":
     import uvicorn
