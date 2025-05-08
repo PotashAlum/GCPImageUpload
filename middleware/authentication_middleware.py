@@ -1,4 +1,5 @@
-from fastapi import HTTPException, Request, Response
+from fastapi import HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 from typing import Dict, Optional
@@ -61,18 +62,23 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         # Extract API key from headers
         api_key = request.headers.get("x-api-key")
         if not api_key:
-            raise HTTPException(
-                status_code=401,
-                detail="API key is missing",
-                headers={"WWW-Authenticate": "ApiKey"},
-            )
+            logger.warning(f"Authentication failure - missing API key: {request.method} {request.url.path}")
+            return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "API key is missing"},
+                    headers={"WWW-Authenticate": "ApiKey"},
+                )
         
         # Authenticate API key and get user info
         try:
             api_key_info = await self.api_key_authentication_service.authenticate_api_key(api_key)
         except HTTPException as e:
             logger.warning(f"Authentication failure for request: {request.method} {request.url.path}")
-            raise e
+            return JSONResponse(
+                    status_code=e.status_code,
+                    content={"detail": e.detail},
+                    headers=e.headers or {"WWW-Authenticate": "ApiKey"},
+                )
         
         try:
             # Normalize path and extract params
@@ -87,7 +93,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             
         except HTTPException as e:
             logger.warning(f"Authorization failure for user {api_key_info.user_id}: {request.method} {request.url.path}")
-            raise e
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"detail": e.detail},
+                headers=e.headers or {"WWW-Authenticate": "ApiKey"},
+            )
 
     def extract_path_parameters(self, path: str) -> Dict[str, str]:
         """Extract resource IDs from the path"""

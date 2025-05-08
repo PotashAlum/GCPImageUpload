@@ -1,7 +1,9 @@
+from datetime import datetime
 import logging
 from fastapi import HTTPException
 from fastapi.security import APIKeyHeader
 
+from models.api_key_model import APIKeyModel
 from services.interfaces.api_key_authentication_interface import IAPIKeyAuthenticationService
 from repository import IRepository
 
@@ -22,7 +24,16 @@ class APIKeyAuthenticationService(IAPIKeyAuthenticationService):
             )
         
         if api_key == self.root_key:
-            return {"role": "root"}
+            rootKeyData = {
+                "id": "",
+                "name": "Development API Key",
+                "key": api_key,
+                "role": "root",
+                "user_id": "",
+                "team_id": "",
+                "created_at": datetime.min,
+            }
+            return APIKeyModel(**rootKeyData)
 
         # Check if it's a valid user API key
         api_key_doc = await self.repository.get_api_key_by_key(api_key)
