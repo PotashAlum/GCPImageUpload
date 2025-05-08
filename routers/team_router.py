@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Dict
+from fastapi import APIRouter, HTTPException
+from typing import List
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 from models import TeamModel
 
 from dependencies import repository, bucket
-
+from models import APIKeyModel, ImageModel, UserModel
 
 # Initialize router
 router = APIRouter(prefix="/teams", tags=["teams"])
@@ -82,4 +82,163 @@ async def delete_team(team_id: str):
     # Delete the team record
     await repository.delete_team(team_id)
     
+    return None
+
+@router.get("/{team_id}/api-keys", response_model=List[APIKeyModel])
+async def list_team_api_keys(
+    team_id: str,
+    skip: int = 0,
+    limit: int = 10
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # This is a bit tricky since we need to get all API keys for all users in the team
+    # First, get all users in the team
+    team_users = await repository.get_users_by_team_id(team_id, 0, 1000)  # Assuming a reasonable limit
+    
+    # Get all API keys for each user
+    all_api_keys = []
+    for user in team_users:
+        user_api_keys = await repository.get_api_keys_by_user_id(user.id, 0, 100)  # Assuming a reasonable limit
+        all_api_keys.extend(user_api_keys)
+    
+    # Apply pagination manually (not ideal, but works for this example)
+    paginated_api_keys = all_api_keys[skip:skip+limit]
+    
+    return paginated_api_keys
+
+@router.get("/{team_id}/api-keys/{api_key_id}", response_model=APIKeyModel)
+async def get_team_api_key(
+    team_id: str,
+    api_key_id: str
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get the API key
+    api_key = await repository.get_api_key_by_id(api_key_id)
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    # Check if API key belongs to the team
+    if api_key.team_id != team_id:
+        raise HTTPException(status_code=403, detail="API key does not belong to this team")
+    
+    return api_key
+
+@router.get("/{team_id}/users", response_model=List[UserModel])
+async def list_team_users(
+    team_id: str,
+    skip: int = 0,
+    limit: int = 10
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get all users in the team
+    users = await repository.get_users_by_team_id(team_id, skip, limit)
+    
+    return users
+
+@router.get("/{team_id}/users/{user_id}", response_model=UserModel)
+async def get_team_user(
+    team_id: str,
+    user_id: str
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get the user
+    user = await repository.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if user belongs to the team
+    if user.team_id != team_id:
+        raise HTTPException(status_code=403, detail="User does not belong to this team")
+    
+    return user
+
+@router.get("/{team_id}/images", response_model=List[ImageModel])
+async def list_team_images(
+    team_id: str,
+    skip: int = 0,
+    limit: int = 10
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get all images for the team
+    images = await repository.get_images_by_team_id(team_id, skip, limit)
+    
+    return images
+
+@router.get("/{team_id}/images/{image_id}", response_model=ImageModel)
+async def get_team_image(
+    team_id: str,
+    image_id: str
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get the image
+    image = await repository.get_image_by_id(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check if image belongs to the team
+    if image.team_id != team_id:
+        raise HTTPException(status_code=403, detail="Image does not belong to this team")
+    
+    # Update the URL if it's expired
+    blob = bucket.blob(image.filename)
+    expiration = timedelta(hours=1)
+    image.url = blob.generate_signed_url(
+        version="v4",
+        expiration=expiration,
+        method="GET"
+    )
+    
+    return image
+
+@router.delete("/{team_id}/images/{image_id}", status_code=204)
+async def delete_team_image(
+    team_id: str,
+    image_id: str
+):
+    # Check if team exists
+    team = await repository.get_team_by_id(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Get the image
+    image = await repository.get_image_by_id(image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    # Check if image belongs to the team
+    if image.team_id != team_id:
+        raise HTTPException(status_code=403, detail="Image does not belong to this team")
+    
+    # Delete from GCS
+    blob = bucket.blob(image.filename)
+    blob.delete()
+    
+    # Delete from database
+    await repository.delete_image(image_id)
+    
+    app_logger.info(f"Image {image_id} deleted from team {team_id}")
     return None

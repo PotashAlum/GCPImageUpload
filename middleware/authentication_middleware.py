@@ -14,7 +14,7 @@ PERMISSION_RULES = {
     "POST": {
         "users": ["root", "admin"],
         "teams": ["root"],
-        "api_keys": ["root", "admin"],
+        "api-keys": ["root", "admin"],
         "images": ["root", "admin", "user"]
     },
     "PUT": {
@@ -29,15 +29,15 @@ PERMISSION_RULES = {
         
         "teams": ["root"],
         "teams/{team_id}": ["root", "admin", "user"],
-        "teams/{team_id}/api_keys": ["root", "admin"],
-        "teams/{team_id}/api_keys/{api_key_id}": ["root", "admin", "user"],
+        "teams/{team_id}/api-keys": ["root", "admin"],
+        "teams/{team_id}/api-keys/{api_key_id}": ["root", "admin", "user"],
         "teams/{team_id}/users": ["root", "admin"],
         "teams/{team_id}/users/{user_id}": ["root", "admin", "user"],
         "teams/{team_id}/images": ["root", "admin", "user"],
         "teams/{team_id}/images/{image_id}": ["root", "admin", "user"],
         
-        "api_keys": ["root"],
-        "api_keys/{api_key_id}": ["root", "admin", "user"],
+        "api-keys": ["root"],
+        "api-keys/{api_key_id}": ["root", "admin", "user"],
         
         "images": ["root"],
         "images/{image_id}": ["root", "admin", "user"],
@@ -46,7 +46,7 @@ PERMISSION_RULES = {
     },
     "DELETE": {
         "users/{user_id}": ["root", "admin"],
-        "api_keys/{api_key_id}": ["root", "admin", "user"],
+        "api-keys/{api_key_id}": ["root", "admin", "user"],
         "teams/{team_id}": ["root"],
         "teams/{team_id}/images/{image_id}": ["root", "admin", "user"]
     }

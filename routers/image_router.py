@@ -143,27 +143,18 @@ async def get_team_image(image_id: str):
     return image
 
 @router.delete("/{image_id}", status_code=204)
-async def delete_team_image(
-    user_id: str,
-    team_id: str,
-    image_id: str
-):
-    
-    team = await repository.get_team_by_id(team_id)
-    if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
-    
+async def delete_image(image_id: str):
     # Get the specific image
-    image = await repository.get_image_by_id({"id": image_id})
+    image = await repository.get_image_by_id(image_id)
     if not image:
-        raise HTTPException(status_code=404, detail="ImageModel not found")
+        raise HTTPException(status_code=404, detail="Image not found")
     
     # Delete from GCS
-    blob = bucket.blob(image["filename"])
+    blob = bucket.blob(image.filename)
     blob.delete()
     
     # Delete from database
-    await repository.images_collection(image_id)
+    await repository.delete_image(image_id)
     
-    app_logger.info(f"ImageModel {image_id} deleted by user {user_id}")
+    app_logger.info(f"Image {image_id} deleted")
     return None
