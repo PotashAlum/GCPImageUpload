@@ -80,8 +80,6 @@ async def delete_team(team_id: str):
     await repository.delete_images_by_team_id(team_id)
     
     # Delete the team record
-    delete_result = await repository.delete_team(team_id)
-    if delete_result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Team not found")
+    await repository.delete_team(team_id)
     
     return None

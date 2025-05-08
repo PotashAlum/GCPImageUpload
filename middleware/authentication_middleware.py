@@ -3,6 +3,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 from typing import Dict, Optional
 
+from models.api_key_model import APIKeyModel
+
 logger = logging.getLogger("app")
 
 # Define permission rules
@@ -80,15 +82,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             # Find matching permission pattern and check permissions
             await self.authorize_request(request.method, path, api_key_info, path_params)
             
-            # Add authenticated user info to request state
-            request.state.user = api_key_info
-            request.state.path_params = path_params
-            
             # Process the request
             return await call_next(request)
             
         except HTTPException as e:
-            logger.warning(f"Authorization failure for user {api_key_info.get('id')}: {request.method} {request.url.path}")
+            logger.warning(f"Authorization failure for user {api_key_info.user_id}: {request.method} {request.url.path}")
             raise e
 
     def extract_path_parameters(self, path: str) -> Dict[str, str]:
@@ -109,10 +107,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         
         return params
 
-    async def authorize_request(self, method: str, path: str, user_info: Dict, path_params: Dict):
+    async def authorize_request(self, method: str, path: str, api_key_info: APIKeyModel, path_params: Dict):
         """Perform all authorization checks for the request"""
         # Root can do anything
-        if user_info["role"] == "root":
+        if api_key_info.role == "root":
             return True
             
         # Find matching permission rule
@@ -128,8 +126,8 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             
         # Check if user's role is allowed for this pattern
         allowed_roles = PERMISSION_RULES[method][matched_pattern]
-        if user_info["role"] not in allowed_roles:
-            logger.warning(f"Role {user_info['role']} not allowed for {method} {path}")
+        if api_key_info.role not in allowed_roles:
+            logger.warning(f"Role {api_key_info.role} not allowed for {method} {path}")
             raise HTTPException(
                 status_code=403,
                 detail="Access denied: Insufficient permissions",
@@ -137,7 +135,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             )
             
         # Check resource ownership
-        await self._verify_resource_ownership(user_info, path_params)
+        await self._verify_resource_ownership(api_key_info, path_params)
         
         return True
         
@@ -178,14 +176,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             key=lambda p: sum(1 for part in p.split("/") if not (part.startswith("{") and part.endswith("}")))
         )
 
-    async def _verify_resource_ownership(self, user_info: Dict, path_params: Dict):
+    async def _verify_resource_ownership(self, api_key_info: APIKeyModel, path_params: Dict):
         """Verify that the user has ownership of the resources they're trying to access"""
         # Root can access anything
-        if user_info["role"] == "root":
+        if api_key_info.role == "root":
             return True
         
         # Check team access
-        if "team_id" in path_params and user_info.get("team_id") != path_params["team_id"]:
+        if "team_id" in path_params and api_key_info.team_id != path_params["team_id"]:
             logger.warning(f"User attempted to access another team's resource")
             raise HTTPException(
                 status_code=403,
@@ -195,17 +193,17 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         
         # User ID access check
         if "user_id" in path_params:
-            if user_info["role"] == "user" and user_info.get("id") != path_params["user_id"]:
+            if api_key_info.role == "user" and api_key_info.user_id != path_params["user_id"]:
                 logger.warning(f"User attempted to access another user's information")
                 raise HTTPException(
                     status_code=403,
                     detail="Access denied: You can only access your own information",
                     headers={"WWW-Authenticate": "ApiKey"},
                 )
-            elif user_info["role"] == "admin":
+            elif api_key_info.role == "admin":
                 # Admin needs to verify user belongs to their team
                 user = await self.repository.get_user_by_id(path_params["user_id"])
-                if not user or user.team_id != user_info.get("team_id"):
+                if not user or user.team_id != api_key_info.team_id:
                     logger.warning(f"Admin attempted to access user from another team")
                     raise HTTPException(
                         status_code=403,
@@ -220,14 +218,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             if not api_key:
                 raise HTTPException(status_code=404, detail="API key not found")
                 
-            if user_info["role"] == "user" and api_key.user_id != user_info.get("id"):
+            if api_key_info.role == "user" and api_key.user_id != api_key_info.user_id:
                 logger.warning(f"User attempted to access another user's API key")
                 raise HTTPException(
                     status_code=403,
                     detail="Access denied: You can only access your own API keys",
                     headers={"WWW-Authenticate": "ApiKey"},
                 )
-            elif user_info["role"] == "admin" and api_key.team_id != user_info.get("team_id"):
+            elif api_key_info.role == "admin" and api_key.team_id != api_key_info.team_id:
                 logger.warning(f"Admin attempted to access API key from another team")
                 raise HTTPException(
                     status_code=403,
@@ -242,7 +240,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             if not image:
                 raise HTTPException(status_code=404, detail="Image not found")
                 
-            if image.team_id != user_info.get("team_id"):
+            if image.team_id != api_key_info.team_id:
                 logger.warning(f"User attempted to access image from another team")
                 raise HTTPException(
                     status_code=403,
