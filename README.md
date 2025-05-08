@@ -1,11 +1,11 @@
-# User Image Management Service
+# User ImageModel Management Service
 
 A lightweight REST API for user account creation and image management, with cloud storage integration.
 
 ## Features
 
 - User management (create, read, update, delete)
-- Image upload and management
+- ImageModel upload and management
 - Google Cloud Storage integration
 - API key authentication
 - Containerized deployment with Docker

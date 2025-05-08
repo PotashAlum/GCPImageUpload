@@ -20,8 +20,8 @@ services:
       - mongodb
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/user_image_db
-      - GCS_BUCKET_NAME=user-images-bucket
-      - ROOT_API_KEY=admin-root-key
+      - GCS_BUCKET_NAME=ancient-acumen-458608-u2-image-storage
+      - ROOT_API_KEY=root-key-aefnawefnaoweno
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-credentials.json
     volumes:
       - ./credentials:/app/credentials
