@@ -4,8 +4,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 from middleware import AuditMiddleware, AuthenticationMiddleware
 
+from middleware.authorization_middleware import AuthorizationMiddleware
 from routers import audit_log_router, image_router, team_router, user_router, api_key_router
-from dependencies import repository, api_key_authentication_service
+from dependencies import repository, api_key_authentication_service, authorization_service, audit_log_service
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,13 +26,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add audit middleware
-app.add_middleware(AuditMiddleware, 
-                   repository = repository)
-app.add_middleware(AuthenticationMiddleware, 
-                   repository = repository, 
-                   api_key_authentication_service = api_key_authentication_service)
-
+app.add_middleware(
+    AuditMiddleware, 
+    audit_log_service=audit_log_service
+)
+app.add_middleware(
+    AuthorizationMiddleware, 
+    authorization_service=authorization_service
+)
+app.add_middleware(
+    AuthenticationMiddleware, 
+    api_key_authentication_service=api_key_authentication_service
+)
 
 # Include routers
 app.include_router(api_key_router.router)

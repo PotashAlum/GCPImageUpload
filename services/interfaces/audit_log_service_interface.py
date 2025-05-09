@@ -1,13 +1,39 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from datetime import datetime
-from models import AuditLogModel
+from models import AuditLogModel, APIKeyModel
 
 class IAuditLogService(ABC):
     """
     Interface for audit log service operations.
     Defines the contract that any audit log service implementation must follow.
     """
+    
+    @abstractmethod
+    async def create_audit_log(self, audit_log: AuditLogModel) -> AuditLogModel:
+        """
+        Creates a new audit log entry
+        
+        Args:
+            audit_log: log entry information
+        
+        Returns:
+            returns the audit_log
+        """
+        pass
+    
+    @abstractmethod
+    async def get_api_key_info(self, key: str) -> APIKeyModel:
+        """
+        Retrieve API key info
+        
+        Args:
+            key: key to retrieve info for
+        
+        Returns:
+            Key info
+        """
+        pass
     
     @abstractmethod
     async def list_audit_logs(

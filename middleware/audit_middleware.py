@@ -5,15 +5,16 @@ import uuid
 import json
 import logging
 
-from repository import IRepository
+from models.audit_log_model import AuditLogModel
+from services.interfaces.audit_log_service_interface import IAuditLogService
 
 # Get the audit logger
 audit_logger = logging.getLogger("audit")
 
 class AuditMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, repository: IRepository):
+    def __init__(self, app, audit_log_service: IAuditLogService):
         super().__init__(app)
-        self.repository = repository
+        self.audit_log_service = audit_log_service
 
     async def dispatch(self, request: Request, call_next):
         start_time = datetime.now()
@@ -30,11 +31,11 @@ class AuditMiddleware(BaseHTTPMiddleware):
         # Get user ID from API key if possible
         api_key_doc = None
         if api_key:
-            api_key_doc = await self.repository.api_keys.get_api_key_by_key(api_key)
+            api_key_doc = await self.audit_log_service.get_api_key_info(api_key)
         user_id = api_key_doc.user_id if api_key_doc else None
         
         # Create audit log entry
-        log_entry = {
+        log_entry: AuditLogModel = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "action": method,
@@ -55,6 +56,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
         audit_logger.info(json.dumps(log_entry, indent=4, sort_keys=True, default=str))
         
         # Store in database
-        await self.repository.audit_logs.create_audit_log(log_entry)
+        await self.audit_log_service.create_audit_log(log_entry)
         
         return response

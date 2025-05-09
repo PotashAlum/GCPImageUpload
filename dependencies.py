@@ -8,7 +8,8 @@ from services.service_factory import (
     create_image_service,
     create_team_service,
     create_user_service,
-    create_gcp_storage_service
+    create_gcp_storage_service,
+    create_authorization_service
 )
 
 from utils import initialize_app_logger
@@ -36,3 +37,4 @@ audit_log_service = create_audit_log_service(repository)
 image_service = create_image_service(repository, storage_service)
 team_service = create_team_service(repository, storage_service)
 user_service = create_user_service(repository)
+authorization_service = create_authorization_service(repository)
