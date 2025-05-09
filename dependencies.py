@@ -1,7 +1,7 @@
 import os
 
 from repository import create_mongo_db_repository
-from factories.service_factory import (
+from services.service_factory import (
     create_api_key_management_service,
     create_api_key_authentication_service,
     create_audit_log_service,
