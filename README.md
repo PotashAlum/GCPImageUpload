@@ -1,35 +1,3 @@
-## Middleware Implementation
-
-The application uses a middleware-based approach for cross-cutting concerns:
-
-### Authentication Middleware
-
-The authentication middleware handles API key validation and authorization:
-
-1. **API Key Extraction**: Extracts the API key from the `X-API-Key` header
-2. **Authentication**: Validates the API key against the database
-3. **Path Analysis**: Normalizes the request path and extracts resource identifiers
-4. **Permission Checking**: Matches the request against defined permission rules
-5. **Resource Ownership Verification**: Ensures users only access authorized resources
-
-The middleware implements a sophisticated pattern-matching algorithm to determine which permission rules apply to a given request, enforcing both role-based permissions and resource ownership.
-
-### Audit Middleware
-
-The audit middleware logs all API operations:
-
-1. **Request Capture**: Records incoming request details
-2. **Response Capture**: Records response status and timing
-3. **Audit Log Creation**: Stores a complete audit record including:
-   - User ID and API key information
-   - Resource type and ID
-   - Action performed
-   - Request status (success/failure)
-   - Timestamp
-   - Request duration
-
-All audit logs are searchable through the `/audit-logs` endpoint (accessible only to root users).# Image Management API
-
 A scalable, cloud-based service for teams to securely store, organize, and retrieve images using modern cloud technologies. Built with FastAPI, Google Cloud Storage, and MongoDB.
 
 This service follows clean architecture principles with a clear separation of concerns:
