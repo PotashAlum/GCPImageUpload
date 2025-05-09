@@ -25,11 +25,19 @@ class MongoDBImageRepository(IImageRepository):
         return ImageModel(**image_data) if image_data else None
     
     async def get_images_by_team_id(self, team_id: str, skip: int = 0, limit: int = 10) -> List[ImageModel]:
-        images_data = await self.db.find({"team_id": team_id}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find({"team_id": team_id})
+        cursor = cursor.sort("created_at", -1)
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        images_data = await cursor.to_list(limit)
         return [ImageModel(**image) for image in images_data]
     
     async def get_images_by_user_id(self, user_id: str, skip: int = 0, limit: int = 10) -> List[ImageModel]:
-        images_data = await self.db.find({"user_id": user_id}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find({"user_id": user_id})
+        cursor = cursor.sort("created_at", -1)
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        images_data = await cursor.to_list(limit)
         return [ImageModel(**image) for image in images_data]
     
     async def delete_image(self, image_id: str) -> None:

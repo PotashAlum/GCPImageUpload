@@ -32,11 +32,17 @@ class MongoDBAPIKeyRepository(IAPIKeyRepository):
         return [APIKeyModel(**api_key) for api_key in api_keys_data]
     
     async def list_api_keys(self, skip: int = 0, limit: int = 10) -> List[APIKeyModel]:
-        api_keys_data = await self.db.find().skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find()
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        api_keys_data = await cursor.to_list(limit)
         return [APIKeyModel(**api_key) for api_key in api_keys_data]
     
     async def get_api_keys_by_user_id(self, user_id: str, skip: int = 0, limit: int = 10) -> List[APIKeyModel]:
-        api_keys_data = await self.db.find({"user_id": user_id}).skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find({"user_id": user_id})
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        api_keys_data = await cursor.to_list(limit)
         return [APIKeyModel(**api_key) for api_key in api_keys_data]
     
     async def delete_api_key(self, api_key_id: str) -> None:

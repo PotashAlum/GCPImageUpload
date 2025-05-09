@@ -1,0 +1,27 @@
+# Dockerfile.test
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy setup.py first for dependency installation
+COPY setup.py .
+COPY requirements.txt .
+
+# Install dependencies with dev extras
+RUN pip install --no-cache-dir -e ".[dev]"
+
+# Copy the rest of the application
+COPY . .
+
+# Set environment variables for testing
+ENV ROOT_API_KEY=test-root-key
+ENV MONGODB_URI=mongodb://mongodb-test:27017/test_user_image_db
+ENV GCS_BUCKET_NAME=test-bucket
+
+# Default command
+CMD ["pytest", "-v"]

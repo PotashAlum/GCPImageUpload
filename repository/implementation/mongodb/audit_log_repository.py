@@ -21,5 +21,9 @@ class MongoDBauditLogRepository(IAuditLogRepository):
         return log_instance
     
     async def get_audit_logs(self, query: dict, skip: int = 0, limit: int = 10) -> List[AuditLogModel]:
-        audit_logs_data = await self.audit_logs_collection.find(query).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find(query)
+        cursor = cursor.sort("timestamp", -1)
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        audit_logs_data = await cursor.to_list(limit)
         return [AuditLogModel(**log) for log in audit_logs_data]

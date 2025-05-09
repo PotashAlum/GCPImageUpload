@@ -28,7 +28,10 @@ class MongoDBTeamRepository(ITeamRepository):
         return TeamModel(**team_data) if team_data else None
     
     async def get_teams(self, skip: int, limit: int) -> List[TeamModel]:
-        teams_data = await self.db.find().skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find()
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        teams_data = await cursor.to_list(limit)
         return [TeamModel(**team) for team in teams_data]
     
     async def delete_team(self, team_id: str) -> None:

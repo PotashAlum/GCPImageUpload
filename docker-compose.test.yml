@@ -1,0 +1,40 @@
+# docker-compose.test.yml
+version: '3.8'
+
+services:
+  test-runner:
+    build: 
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: test-runner
+    environment:
+      - ROOT_API_KEY=test-root-key
+      - MONGODB_URI=mongodb://mongodb-test:27017/test_user_image_db
+      - GCS_BUCKET_NAME=test-bucket
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-credentials.json
+    volumes:
+      - ./:/app
+    networks:
+      - test-network
+    command: pytest -v
+
+  # Optional: Use a real MongoDB instead of mongomock if preferred
+  mongodb-test:
+    image: mongo:latest
+    container_name: mongodb-test
+    ports:
+      - "27018:27017"  # Different port from main app
+    environment:
+      - MONGO_INITDB_DATABASE=test_user_image_db
+    volumes:
+      - mongodb_test_data:/data/db
+    networks:
+      - test-network
+
+volumes:
+  mongodb_test_data:
+    name: mongodb_test_data
+
+networks:
+  test-network:
+    driver: bridge

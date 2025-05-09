@@ -1,5 +1,6 @@
 import logging
 import secrets
+from typing import List
 import uuid
 import hashlib
 import os
@@ -120,6 +121,21 @@ class APIKeyManagementService(IAPIKeyManagementService):
         
         # No matching key found
         raise HTTPException(status_code=404, detail="API key not found")
+
+    async def get_api_keys_by_user_id(self, user_id: str, skip: int = 0, limit: int = 10) -> List[APIKeyModel]:
+        """
+        Get API keys for a specific user
+        
+        Args:
+            user_id: The user ID to get API keys for
+            skip: Number of records to skip (pagination)
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of API key models
+        """
+        api_keys = await self.repository.api_keys.get_api_keys_by_user_id(user_id, skip, limit)
+        return api_keys
 
     async def delete_api_key(self, api_key_id: str):
         # First verify the API key exists

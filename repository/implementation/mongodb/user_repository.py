@@ -38,7 +38,10 @@ class MongoDBUserRepository(IUserRepository):
         return [UserModel(**user) for user in users_data]
     
     async def get_users_by_team_id(self, team_id: str, skip: int = 0, limit: int = 10) -> List[UserModel]:
-        users_data = await self.db.find({"team_id": team_id}).skip(skip).limit(limit).to_list(limit)
+        cursor = self.db.find({"team_id": team_id})
+        cursor = cursor.skip(skip)
+        cursor = cursor.limit(limit)
+        users_data = await cursor.to_list(limit)
         return [UserModel(**user) for user in users_data]
     
     async def get_users_count_by_team_id(self, team_id: str) -> int:
