@@ -19,16 +19,16 @@ async def create_user(username, email, team_id):
     app_logger.info(f"Creating new user: {username}")
     
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Check if username already exists
-    if await repository.get_user_by_username(username):
+    if await repository.users.get_user_by_username(username):
         raise HTTPException(status_code=400, detail="Username already registered")
     
     # Check if email already exists
-    if await repository.get_user_by_email(email):
+    if await repository.users.get_user_by_email(email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create new user
@@ -43,13 +43,13 @@ async def create_user(username, email, team_id):
         "created_at": created_at
     }
     
-    await repository.create_user(user_db)
+    await repository.users.create_user(user_db)
     return {**user_db}
 
 @router.get("/{user_id}", response_model=UserModel)
 async def get_user(user_id: str):
     
-    user = await repository.get_user_by_id(user_id)
+    user = await repository.users.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -60,23 +60,21 @@ async def list_users(
     skip: int = 0, 
     limit: int = 10,
 ):
-    users = await repository.get_users(skip, limit)
+    users = await repository.users.get_users(skip, limit)
     return users
 
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: str):
     
     # Check if user exists
-    existing_user = await repository.get_user_by_id(user_id)
+    existing_user = await repository.users.get_user_by_id(user_id)
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
     
     # First, delete all API keys associated with the user
-    await repository.delete_user_api_keys(user_id)
+    await repository.api_keys.delete_user_api_keys(user_id)
     
     # Delete the user record
-    delete_result = await repository.delete_user(user_id)
-    if delete_result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
+    await repository.users.delete_user(user_id)
     
     return None

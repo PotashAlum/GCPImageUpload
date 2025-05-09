@@ -26,7 +26,8 @@ app.add_middleware(
 )
 
 # Add audit middleware
-app.add_middleware(AuditMiddleware)
+app.add_middleware(AuditMiddleware, 
+                   repository = repository)
 app.add_middleware(AuthenticationMiddleware, 
                    repository = repository, 
                    api_key_authentication_service = api_key_authentication_service)

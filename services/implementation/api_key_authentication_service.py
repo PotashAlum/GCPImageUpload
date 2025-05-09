@@ -36,7 +36,7 @@ class APIKeyAuthenticationService(IAPIKeyAuthenticationService):
             return APIKeyModel(**rootKeyData)
 
         # Check if it's a valid user API key
-        api_key_doc = await self.repository.get_api_key_by_key(api_key)
+        api_key_doc = await self.repository.api_keys.get_api_key_by_key(api_key)
         
         if not api_key_doc:
             self.logger.warning(f"Invalid API key attempt")

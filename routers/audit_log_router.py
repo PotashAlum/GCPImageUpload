@@ -45,5 +45,5 @@ async def list_audit_logs(
         query["timestamp"] = date_query
        
     # Get logs
-    logs = await repository.get_audit_logs(query, skip, limit)
+    logs = await repository.audit_logs.get_audit_logs(query, skip, limit)
     return logs

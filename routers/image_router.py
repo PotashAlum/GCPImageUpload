@@ -22,7 +22,7 @@ async def upload_team_image(
     tags: Optional[str] = None,  # Comma-separated list of tags
     file: UploadFile = File(...),
 ):    
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
@@ -105,7 +105,7 @@ async def upload_team_image(
         "created_at": datetime.now()
     }
     
-    await repository.create_image(image_data)
+    await repository.images.create_image(image_data)
     app_logger.info(f"ImageModel {image_id} uploaded to team {team_id} by user {user_id}")
     
     return image_data
@@ -116,18 +116,18 @@ async def list_team_images(
     skip: int = 0,
     limit: int = 10,
 ):
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get team's images
-    images = await repository.get_images_by_team_id(team_id, skip, limit)
+    images = await repository.images.get_images_by_team_id(team_id, skip, limit)
     return images
 
 @router.get("/{image_id}", response_model=ImageModel)
 async def get_team_image(image_id: str):
     # Get the specific image
-    image = await repository.get_image_by_id(image_id)
+    image = await repository.images.get_image_by_id(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="ImageModel not found")
     
@@ -145,7 +145,7 @@ async def get_team_image(image_id: str):
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(image_id: str):
     # Get the specific image
-    image = await repository.get_image_by_id(image_id)
+    image = await repository.images.get_image_by_id(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     
@@ -154,7 +154,7 @@ async def delete_image(image_id: str):
     blob.delete()
     
     # Delete from database
-    await repository.delete_image(image_id)
+    await repository.images.delete_image(image_id)
     
     app_logger.info(f"Image {image_id} deleted")
     return None

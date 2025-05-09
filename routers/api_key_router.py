@@ -19,6 +19,6 @@ async def list_api_keys():
 async def get_api_key_by_id(api_key_id):
     return await api_key_management_service.get_api_key_by_id(api_key_id)
 
-@router.get("/{api_key_id}", status_code=200)
+@router.delete("/{api_key_id}", status_code=204)
 async def delete_api_key(api_key_id):
     await api_key_management_service.delete_api_key(api_key_id)

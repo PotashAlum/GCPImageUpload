@@ -20,7 +20,7 @@ async def create_team(name, description):
     app_logger.info(f"Creating new team: {name}")
     
     # Check if team name already exists
-    if await repository.get_team_by_name(name):
+    if await repository.teams.get_team_by_name(name):
         raise HTTPException(status_code=400, detail="Team name already exists")
     
     # Create new team
@@ -34,12 +34,12 @@ async def create_team(name, description):
         "created_at": created_at
     }
     
-    await repository.create_team(team_db)
+    await repository.teams.create_team(team_db)
     return {**team_db}
 
 @router.get("/{team_id}", response_model=TeamModel)
 async def get_team(team_id: str):
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
@@ -50,18 +50,18 @@ async def list_teams(
     skip: int = 0, 
     limit: int = 10
 ):
-    teams = await repository.get_teams(skip, limit)
+    teams = await repository.teams.get_teams(skip, limit)
     return teams
 
 @router.delete("/{team_id}", status_code=204)
 async def delete_team(team_id: str):    
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Check if there are any users in the team
-    users_in_team = await repository.get_users_count_by_team_id(team_id)
+    users_in_team = await repository.users.get_users_count_by_team_id(team_id)
     if users_in_team > 0:
         raise HTTPException(
             status_code=400, 
@@ -69,7 +69,7 @@ async def delete_team(team_id: str):
         )
     
     # Delete all images associated with the team
-    team_images = await repository.get_images_by_team_id(team_id)
+    team_images = await repository.images.get_images_by_team_id(team_id)
     
     # Delete the actual image files from GCS
     for image in team_images:
@@ -77,10 +77,10 @@ async def delete_team(team_id: str):
         blob.delete()
     
     # Delete image records from the database
-    await repository.delete_images_by_team_id(team_id)
+    await repository.images.delete_images_by_team_id(team_id)
     
     # Delete the team record
-    await repository.delete_team(team_id)
+    await repository.teams.delete_team(team_id)
     
     return None
 
@@ -91,18 +91,18 @@ async def list_team_api_keys(
     limit: int = 10
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # This is a bit tricky since we need to get all API keys for all users in the team
     # First, get all users in the team
-    team_users = await repository.get_users_by_team_id(team_id, 0, 1000)  # Assuming a reasonable limit
+    team_users = await repository.users.get_users_by_team_id(team_id, 0, 1000)  # Assuming a reasonable limit
     
     # Get all API keys for each user
     all_api_keys = []
     for user in team_users:
-        user_api_keys = await repository.get_api_keys_by_user_id(user.id, 0, 100)  # Assuming a reasonable limit
+        user_api_keys = await repository.api_keys.get_api_keys_by_user_id(user.id, 0, 100)  # Assuming a reasonable limit
         all_api_keys.extend(user_api_keys)
     
     # Apply pagination manually (not ideal, but works for this example)
@@ -116,12 +116,12 @@ async def get_team_api_key(
     api_key_id: str
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get the API key
-    api_key = await repository.get_api_key_by_id(api_key_id)
+    api_key = await repository.api_keys.get_api_key_by_id(api_key_id)
     if not api_key:
         raise HTTPException(status_code=404, detail="API key not found")
     
@@ -138,12 +138,12 @@ async def list_team_users(
     limit: int = 10
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get all users in the team
-    users = await repository.get_users_by_team_id(team_id, skip, limit)
+    users = await repository.users.get_users_by_team_id(team_id, skip, limit)
     
     return users
 
@@ -153,12 +153,12 @@ async def get_team_user(
     user_id: str
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get the user
-    user = await repository.get_user_by_id(user_id)
+    user = await repository.users.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -175,12 +175,12 @@ async def list_team_images(
     limit: int = 10
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get all images for the team
-    images = await repository.get_images_by_team_id(team_id, skip, limit)
+    images = await repository.images.get_images_by_team_id(team_id, skip, limit)
     
     return images
 
@@ -190,12 +190,12 @@ async def get_team_image(
     image_id: str
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get the image
-    image = await repository.get_image_by_id(image_id)
+    image = await repository.images.get_image_by_id(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     
@@ -220,12 +220,12 @@ async def delete_team_image(
     image_id: str
 ):
     # Check if team exists
-    team = await repository.get_team_by_id(team_id)
+    team = await repository.teams.get_team_by_id(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     
     # Get the image
-    image = await repository.get_image_by_id(image_id)
+    image = await repository.images.get_image_by_id(image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     
@@ -238,7 +238,7 @@ async def delete_team_image(
     blob.delete()
     
     # Delete from database
-    await repository.delete_image(image_id)
+    await repository.images.delete_image(image_id)
     
     app_logger.info(f"Image {image_id} deleted from team {team_id}")
     return None
