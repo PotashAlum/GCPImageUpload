@@ -9,48 +9,52 @@ from services.interfaces.authorization_service_interface import IAuthorizationSe
 
 logger = logging.getLogger("app")
 
-# Define permission rules
-# Format: {HTTP_METHOD: {resource_path_pattern: [allowed_roles]}}
+# Define permission rules with minimum required role
+# Format: {HTTP_METHOD: {resource_path_pattern: minimum_role}}
 PERMISSION_RULES = {
     "POST": {
-        "users": ["root", "admin"],
-        "teams": ["root"],
-        "api-keys": ["root", "admin"],
-        "images": ["root", "admin", "user"]
+        "teams": "root",
+        "teams/{team_id}/api-keys": "admin",
+        "teams/{team_id}/users": "admin",
+        "teams/{team_id}/images": "user",
     },
     "PUT": {
-        "users/{user_id}": ["root", "admin"],
-        "teams/{team_id}": ["root", "admin"],
-        "images/{image_id}": ["root", "admin", "user"]
+        "teams/{team_id}": "admin",
+        "teams/{team_id}/api-keys/{api_key_id}": "admin",
+        "teams/{team_id}/users/{user_id}": "admin",
+        "teams/{team_id}/images/{image_id}": "admin",
+        "teams/{team_id}/users/{user_id}/images/{image_id}": "user",
     },
     "GET": {
-        "users": ["root"],
-        "users/{user_id}": ["root", "admin", "user"],
-        "users/{user_id}/images": ["root", "admin", "user"],
-        
-        "teams": ["root"],
-        "teams/{team_id}": ["root", "admin", "user"],
-        "teams/{team_id}/api-keys": ["root", "admin"],
-        "teams/{team_id}/api-keys/{api_key_id}": ["root", "admin", "user"],
-        "teams/{team_id}/users": ["root", "admin"],
-        "teams/{team_id}/users/{user_id}": ["root", "admin", "user"],
-        "teams/{team_id}/images": ["root", "admin", "user"],
-        "teams/{team_id}/images/{image_id}": ["root", "admin", "user"],
-        
-        "api-keys": ["root"],
-        "api-keys/{api_key_id}": ["root", "admin", "user"],
-        
-        "images": ["root"],
-        "images/{image_id}": ["root", "admin", "user"],
-
-        "audit_logs": ["root"]
+        "teams": "root",
+        "teams/{team_id}": "user",
+        "teams/{team_id}/api-keys": "admin",
+        "teams/{team_id}/api-keys/{api_key_id}": "admin",
+        "teams/{team_id}/users": "user",
+        "teams/{team_id}/users/{user_id}": "user",
+        "teams/{team_id}/images": "user",
+        "teams/{team_id}/images/{image_id}": "user",
+        "teams/{team_id}/users/{user_id}/api-keys": "user",
+        "teams/{team_id}/users/{user_id}/api-keys/{api_key_id}": "user",
+        "teams/{team_id}/users/{user_id}/images": "user",
+        "teams/{team_id}/users/{user_id}/images/{image_id}": "user",
+        "audit-logs": "root",
     },
     "DELETE": {
-        "users/{user_id}": ["root", "admin"],
-        "api-keys/{api_key_id}": ["root", "admin", "user"],
-        "teams/{team_id}": ["root"],
-        "teams/{team_id}/images/{image_id}": ["root", "admin", "user"]
+        "teams/{team_id}": "root",
+        "teams/{team_id}/api-keys/{api_key_id}": "admin",
+        "teams/{team_id}/users/{user_id}": "admin",
+        "teams/{team_id}/images/{image_id}": "admin",
+        "teams/{team_id}/users/{user_id}/api-keys/{api_key_id}": "user",
+        "teams/{team_id}/users/{user_id}/images/{image_id}": "user",
     }
+}
+
+# Role hierarchy for permission checks
+ROLE_HIERARCHY = {
+    "root": ["root", "admin", "user"],
+    "admin": ["admin", "user"],
+    "user": ["user"]
 }
 
 class AuthorizationService(IAuthorizationService):
@@ -94,8 +98,8 @@ class AuthorizationService(IAuthorizationService):
             )
             
         # Check if user's role is allowed for this pattern
-        allowed_roles = PERMISSION_RULES[method][matched_pattern]
-        if api_key_info.role not in allowed_roles:
+        required_role = PERMISSION_RULES[method][matched_pattern]
+        if not self._is_role_authorized(api_key_info.role, required_role):
             self.logger.warning(f"Role {api_key_info.role} not allowed for {method} {path}")
             raise HTTPException(
                 status_code=403,
@@ -104,9 +108,16 @@ class AuthorizationService(IAuthorizationService):
             )
             
         # Check resource ownership
-        await self._verify_resource_ownership(api_key_info, path_params)
+        await self._verify_resource_ownership(api_key_info, path_params, method)
         
         return True
+    
+    def _is_role_authorized(self, user_role: str, required_role: str) -> bool:
+        """
+        Check if the user's role is sufficient for the required role
+        """
+        allowed_roles = ROLE_HIERARCHY.get(user_role, [])
+        return required_role in allowed_roles
         
     def _find_matching_pattern(self, method: str, path: str) -> Optional[str]:
         """Find the most specific pattern matching the request path"""
@@ -145,13 +156,13 @@ class AuthorizationService(IAuthorizationService):
             key=lambda p: sum(1 for part in p.split("/") if not (part.startswith("{") and part.endswith("}")))
         )
 
-    async def _verify_resource_ownership(self, api_key_info: APIKeyModel, path_params: Dict):
+    async def _verify_resource_ownership(self, api_key_info: APIKeyModel, path_params: Dict, method: str):
         """Verify that the user has ownership of the resources they're trying to access"""
         # Root can access anything
         if api_key_info.role == "root":
             return True
         
-        # Check team access
+        # Check team access - user must be part of the team they're accessing
         if "team_id" in path_params and api_key_info.team_id != path_params["team_id"]:
             self.logger.warning(f"User attempted to access another team's resource")
             raise HTTPException(
@@ -160,7 +171,7 @@ class AuthorizationService(IAuthorizationService):
                 headers={"WWW-Authenticate": "ApiKey"},
             )
         
-        # User ID access check
+        # User ID access check - regular users can only access their own data
         if "user_id" in path_params:
             if api_key_info.role == "user" and api_key_info.user_id != path_params["user_id"]:
                 self.logger.warning(f"User attempted to access another user's information")
@@ -171,7 +182,7 @@ class AuthorizationService(IAuthorizationService):
                 )
             elif api_key_info.role == "admin":
                 # Admin needs to verify user belongs to their team
-                user = await self.repository.images.get_image_by_id(path_params["user_id"])
+                user = await self.repository.users.get_user_by_id(path_params["user_id"])
                 if not user or user.team_id != api_key_info.team_id:
                     self.logger.warning(f"Admin attempted to access user from another team")
                     raise HTTPException(
@@ -202,7 +213,7 @@ class AuthorizationService(IAuthorizationService):
                     headers={"WWW-Authenticate": "ApiKey"},
                 )
         
-        # Image access check
+        # Image access check - extra verification for DELETE operations
         if "image_id" in path_params:
             image = await self.repository.images.get_image_by_id(path_params["image_id"])
             
@@ -214,6 +225,15 @@ class AuthorizationService(IAuthorizationService):
                 raise HTTPException(
                     status_code=403,
                     detail="Access denied: Image does not belong to your team",
+                    headers={"WWW-Authenticate": "ApiKey"},
+                )
+                
+            # For DELETE operations, users can only delete their own images unless they are admins
+            if method == "DELETE" and api_key_info.role == "user" and image.user_id != api_key_info.user_id:
+                self.logger.warning(f"User attempted to delete another user's image")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: You can only delete your own images",
                     headers={"WWW-Authenticate": "ApiKey"},
                 )
         
