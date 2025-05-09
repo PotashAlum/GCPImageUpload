@@ -5,6 +5,8 @@ import logging
 from typing import Dict, Optional
 
 from models.api_key_model import APIKeyModel
+from repository.interfaces.repository_interface import IRepository
+from services.interfaces.api_key_authentication_interface import IAPIKeyAuthenticationService
 
 logger = logging.getLogger("app")
 
@@ -53,7 +55,10 @@ PERMISSION_RULES = {
 }
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, repository, api_key_authentication_service):
+    def __init__(self, 
+                 app, 
+                 repository: IRepository, 
+                 api_key_authentication_service: IAPIKeyAuthenticationService):
         super().__init__(app)
         self.repository = repository
         self.api_key_authentication_service = api_key_authentication_service
@@ -212,7 +217,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 )
             elif api_key_info.role == "admin":
                 # Admin needs to verify user belongs to their team
-                user = await self.repository.get_user_by_id(path_params["user_id"])
+                user = await self.repository.images.get_image_by_id(path_params["user_id"])
                 if not user or user.team_id != api_key_info.team_id:
                     logger.warning(f"Admin attempted to access user from another team")
                     raise HTTPException(
@@ -223,7 +228,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         
         # API key access check
         if "api_key_id" in path_params:
-            api_key = await self.repository.get_api_key_by_id(path_params["api_key_id"])
+            api_key = await self.repository.api_keys.get_api_key_by_id(path_params["api_key_id"])
             
             if not api_key:
                 raise HTTPException(status_code=404, detail="API key not found")
@@ -245,7 +250,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         
         # Image access check
         if "image_id" in path_params:
-            image = await self.repository.get_image_by_id(path_params["image_id"])
+            image = await self.repository.images.get_image_by_id(path_params["image_id"])
             
             if not image:
                 raise HTTPException(status_code=404, detail="Image not found")

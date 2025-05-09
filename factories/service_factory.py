@@ -5,11 +5,13 @@ from services.implementation.audit_log_service import AuditLogService
 from services.implementation.image_service import ImageService
 from services.implementation.team_service import TeamService
 from services.implementation.user_service import UserService
+from services.implementation.gcp_file_storage_service import GCPStorageService
 
 from services.interfaces.api_key_authentication_interface import IAPIKeyAuthenticationService
 from services.interfaces.api_key_management_interface import IAPIKeyManagementService
 from services.interfaces.audit_log_service_interface import IAuditLogService
 from services.interfaces.image_service_interface import IImageService
+from services.interfaces.storage_service_interface import IStorageService
 from services.interfaces.team_service_interface import ITeamService
 from services.interfaces.user_service_interface import IUserService
 
@@ -22,11 +24,14 @@ def create_api_key_authentication_service(repository: IRepository, root_key: str
 def create_audit_log_service(repository: IRepository) -> IAuditLogService:
     return AuditLogService(repository)
 
-def create_image_service(repository: IRepository, bucket, bucket_name: str) -> IImageService:
-    return ImageService(repository, bucket, bucket_name)
+def create_image_service(repository: IRepository, storage_service: IStorageService) -> IImageService:
+    return ImageService(repository, storage_service)
 
-def create_team_service(repository: IRepository, bucket) -> ITeamService:
-    return TeamService(repository, bucket)
+def create_team_service(repository: IRepository, storage_service: IStorageService) -> ITeamService:
+    return TeamService(repository, storage_service)
 
 def create_user_service(repository: IRepository) -> IUserService:
     return UserService(repository)
+
+def create_gcp_storage_service(bucket, bucket_name) -> IUserService:
+    return GCPStorageService(bucket, bucket_name)

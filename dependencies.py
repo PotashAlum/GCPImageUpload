@@ -7,7 +7,8 @@ from factories.service_factory import (
     create_audit_log_service,
     create_image_service,
     create_team_service,
-    create_user_service
+    create_user_service,
+    create_gcp_storage_service
 )
 
 from utils import initialize_app_logger
@@ -28,9 +29,10 @@ repository = create_mongo_db_repository(MONGODB_URI)
 storage_client = storage.Client()
 bucket = storage_client.bucket(GCS_BUCKET_NAME)
 
+storage_service = create_gcp_storage_service(bucket, GCS_BUCKET_NAME)
 api_key_management_service = create_api_key_management_service(repository)
 api_key_authentication_service = create_api_key_authentication_service(repository, ROOT_API_KEY)
 audit_log_service = create_audit_log_service(repository)
-image_service = create_image_service(repository, bucket, GCS_BUCKET_NAME)
-team_service = create_team_service(repository, bucket)
+image_service = create_image_service(repository, storage_service)
+team_service = create_team_service(repository, storage_service)
 user_service = create_user_service(repository)

@@ -10,13 +10,13 @@ from fastapi import HTTPException, UploadFile
 from models import ImageModel
 from repository import IRepository
 from services.interfaces.image_service_interface import IImageService
+from services.interfaces.storage_service_interface import IStorageService
 
 class ImageService(IImageService):
-    def __init__(self, repository: IRepository, bucket, bucket_name: str):
+    def __init__(self, repository: IRepository, storage_service: IStorageService):
         self.logger = logging.getLogger("app")
         self.repository = repository
-        self.bucket = bucket
-        self.bucket_name = bucket_name
+        self.storage_service = storage_service
     
     async def upload_team_image(
         self,
@@ -42,19 +42,15 @@ class ImageService(IImageService):
         # Generate unique ID for the image
         image_id = str(uuid.uuid4())
         
-        # Create a GCS filename with team identifier
+        # Create a storage filename with team identifier
         original_filename = file.filename
         cloud_filename = f"{team_id}/{image_id}_{original_filename}"
         
-        # Upload to GCS
-        blob = self.bucket.blob(cloud_filename)
-        blob.upload_from_file(file.file, content_type=file.content_type)
-        
-        expiration = timedelta(hours=1)  # Set expiration time as needed
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=expiration,
-            method="GET"
+        # Upload to storage service
+        signed_url = await self.storage_service.upload_file(
+            file=file,
+            path=cloud_filename,
+            content_type=file.content_type
         )
         
         # Extract metadata from the image if possible
@@ -138,12 +134,10 @@ class ImageService(IImageService):
         if not image:
             raise HTTPException(status_code=404, detail="Image not found")
         
-        blob = self.bucket.blob(image.filename)
-        expiration = timedelta(hours=1)
-        image.url = blob.generate_signed_url(
-            version="v4",
-            expiration=expiration,
-            method="GET"
+        # Generate a fresh signed URL
+        image.url = await self.storage_service.generate_signed_url(
+            path=image.filename,
+            expiration=timedelta(hours=1)
         )
 
         self.logger.info(f"Image {image_id}")
@@ -158,9 +152,8 @@ class ImageService(IImageService):
         if not image:
             raise HTTPException(status_code=404, detail="Image not found")
         
-        # Delete from GCS
-        blob = self.bucket.blob(image.filename)
-        blob.delete()
+        # Delete from storage
+        await self.storage_service.delete_file(image.filename)
         
         # Delete from database
         await self.repository.images.delete_image(image_id)

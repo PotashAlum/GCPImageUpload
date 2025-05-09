@@ -7,12 +7,13 @@ from fastapi import HTTPException
 from models import TeamModel, APIKeyModel, ImageModel, UserModel
 from repository import IRepository
 from services.interfaces.team_service_interface import ITeamService
+from services.interfaces.storage_service_interface import IStorageService
 
 class TeamService(ITeamService):
-    def __init__(self, repository: IRepository, bucket):
+    def __init__(self, repository: IRepository, storage_service: IStorageService):
         self.logger = logging.getLogger("app")
         self.repository = repository
-        self.bucket = bucket
+        self.storage_service = storage_service
     
     async def create_team(
         self,
@@ -77,10 +78,9 @@ class TeamService(ITeamService):
         # Delete all images associated with the team
         team_images = await self.repository.images.get_images_by_team_id(team_id)
         
-        # Delete the actual image files from GCS
+        # Delete the actual image files from storage
         for image in team_images:
-            blob = self.bucket.blob(image["filename"])
-            blob.delete()
+            await self.storage_service.delete_file(image["filename"])
         
         # Delete image records from the database
         await self.repository.images.delete_images_by_team_id(team_id)
@@ -210,12 +210,9 @@ class TeamService(ITeamService):
             raise HTTPException(status_code=403, detail="Image does not belong to this team")
         
         # Update the URL if it's expired
-        blob = self.bucket.blob(image.filename)
-        expiration = timedelta(hours=1)
-        image.url = blob.generate_signed_url(
-            version="v4",
-            expiration=expiration,
-            method="GET"
+        image.url = await self.storage_service.generate_signed_url(
+            path=image.filename,
+            expiration=timedelta(hours=1)
         )
         
         return image
@@ -239,9 +236,8 @@ class TeamService(ITeamService):
         if image.team_id != team_id:
             raise HTTPException(status_code=403, detail="Image does not belong to this team")
         
-        # Delete from GCS
-        blob = self.bucket.blob(image.filename)
-        blob.delete()
+        # Delete from storage
+        await self.storage_service.delete_file(image.filename)
         
         # Delete from database
         await self.repository.images.delete_image(image_id)
