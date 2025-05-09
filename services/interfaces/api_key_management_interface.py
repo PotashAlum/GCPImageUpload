@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from models import APIKeyModel
+from models import APIKeyModel, APIKeyCreateResponse
 from typing import List
 
 
@@ -10,7 +10,7 @@ class IAPIKeyManagementService(ABC):
     """
     
     @abstractmethod
-    async def create_api_key(self, name: str, role: str, user_id: str, team_id: str) -> APIKeyModel:
+    async def create_api_key(self, name: str, role: str, user_id: str, team_id: str) -> APIKeyCreateResponse:
         """
         Create a new API key with the specified name
         
@@ -21,7 +21,7 @@ class IAPIKeyManagementService(ABC):
             team_id: The team that the user is part of
             
         Returns:
-            Dictionary containing the created API key data
+            APIKeyCreateResponse containing the created API key data including the full key
         """
         pass
     
@@ -57,13 +57,13 @@ class IAPIKeyManagementService(ABC):
         Retrieve info about an API key by its key value
         
         Args:
-            api_key: The key
+            api_key: The key to verify
             
         Returns:
             API key data
             
         Raises:
-            HTTPException: If API key is not found
+            HTTPException: If API key is not found or invalid
         """
         pass
     

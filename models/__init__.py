@@ -1,6 +1,6 @@
 from .user_model import UserModel
 from .team_model import TeamModel
-from .api_key_model import APIKeyModel
+from .api_key_model import APIKeyModel, APIKeyCreateResponse
 from .image_model import ImageMetaDataModel, ImageModel
 from .audit_log_model import AuditLogModel
 
@@ -14,6 +14,7 @@ __all__ = [
     
     # API Key models
     "APIKeyModel",
+    "APIKeyCreateResponse",
     
     # ImageModel models
     "ImageMetaDataModel",

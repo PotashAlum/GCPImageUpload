@@ -13,8 +13,9 @@ class MongoDBAPIKeyRepository(IAPIKeyRepository):
     async def setup_indexes(self):
         """Setup all required indexes for the API keys collection"""
         await self.db.create_index("id", unique=True)
-        await self.db.create_index("key", unique=True)
+        await self.db.create_index("key_prefix")  # Index for faster prefix lookup
         await self.db.create_index("user_id")
+        await self.db.create_index("team_id")
     
     async def create_api_key(self, api_key) -> APIKeyModel:
         await self.db.insert_one(api_key)
@@ -24,9 +25,11 @@ class MongoDBAPIKeyRepository(IAPIKeyRepository):
         api_key_data = await self.db.find_one({"id": api_key_id})
         return APIKeyModel(**api_key_data) if api_key_data else None
     
-    async def get_api_key_by_key(self, api_key: str) -> Optional[APIKeyModel]:
-        api_key_data = await self.db.find_one({"key": api_key})
-        return APIKeyModel(**api_key_data) if api_key_data else None
+    async def get_api_keys_by_prefix(self, key_prefix: str) -> List[APIKeyModel]:
+        """Get API keys that match the provided prefix"""
+        cursor = self.db.find({"key_prefix": key_prefix})
+        api_keys_data = await cursor.to_list(length=100)  # Limit for safety
+        return [APIKeyModel(**api_key) for api_key in api_keys_data]
     
     async def list_api_keys(self, skip: int = 0, limit: int = 10) -> List[APIKeyModel]:
         api_keys_data = await self.db.find().skip(skip).limit(limit).to_list(limit)

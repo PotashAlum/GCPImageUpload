@@ -23,19 +23,6 @@ class IAuditLogService(ABC):
         pass
     
     @abstractmethod
-    async def get_api_key_info(self, key: str) -> APIKeyModel:
-        """
-        Retrieve API key info
-        
-        Args:
-            key: key to retrieve info for
-        
-        Returns:
-            Key info
-        """
-        pass
-    
-    @abstractmethod
     async def list_audit_logs(
         self,
         skip: int = 0,

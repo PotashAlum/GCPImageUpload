@@ -62,7 +62,7 @@ After role-based access is confirmed, resource ownership is verified:
 - `DELETE /teams/{team_id}/users/{user_id}` - Delete a team user (Admin+)
 
 ### Team API Keys
-- `POST /teams/{team_id}/api-keys/` - Create a new API key for team (Admin+)
+- `POST /teams/{team_id}/users/{user_id}/api-keys/` - Create a new API key for team (Admin+)
 - `GET /teams/{team_id}/api-keys/` - List team API keys (Admin+)
 - `GET /teams/{team_id}/api-keys/{api_key_id}` - Get a specific team API key (Admin+)
 - `DELETE /teams/{team_id}/api-keys/{api_key_id}` - Delete a team API key (Admin+)

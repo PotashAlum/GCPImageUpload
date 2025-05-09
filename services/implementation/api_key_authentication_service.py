@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import hashlib
 from fastapi import HTTPException
 from fastapi.security import APIKeyHeader
 
@@ -14,8 +15,11 @@ class APIKeyAuthenticationService(IAPIKeyAuthenticationService):
         self.logger = logging.getLogger("app")
         self.repository = repository
         self.root_key = root_key
+        self.KEY_PREFIX_LENGTH = 8  # Must match value in APIKeyManagementService
+        self.PBKDF2_ITERATIONS = 100000  # Must match value in APIKeyManagementService
         
     async def authenticate_api_key(self, api_key):
+        """Authenticate an API key without storing the actual key in the database"""
         if not api_key:
             raise HTTPException(
                 status_code=401,
@@ -23,27 +27,61 @@ class APIKeyAuthenticationService(IAPIKeyAuthenticationService):
                 headers={"WWW-Authenticate": "ApiKey"},
             )
         
+        # Special case for root key
         if api_key == self.root_key:
-            rootKeyData = {
-                "id": "",
-                "name": "Development API Key",
-                "key": api_key,
+            root_key_data = {
+                "id": "root",
+                "name": "Root API Key",
+                "key_prefix": "",
+                "key_hash": "",
+                "key_salt": "",
                 "role": "root",
-                "user_id": "",
+                "user_id": "root",
                 "team_id": "",
-                "created_at": datetime.min,
+                "created_at": datetime.now(),
             }
-            return APIKeyModel(**rootKeyData)
+            return APIKeyModel(**root_key_data)
 
-        # Check if it's a valid user API key
-        api_key_doc = await self.repository.api_keys.get_api_key_by_key(api_key)
+        # Extract prefix from provided key for efficient lookup
+        if len(api_key) < self.KEY_PREFIX_LENGTH:
+            self.logger.warning(f"API key too short")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid API key",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+            
+        key_prefix = api_key[:self.KEY_PREFIX_LENGTH]
         
-        if not api_key_doc:
-            self.logger.warning(f"Invalid API key attempt")
+        # Find potential matching keys by prefix
+        potential_keys = await self.repository.api_keys.get_api_keys_by_prefix(key_prefix)
+        
+        if not potential_keys:
+            self.logger.warning(f"No API keys found with prefix {key_prefix}")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid API key",
                 headers={"WWW-Authenticate": "ApiKey"},
             )
         
-        return api_key_doc
+        # Check each potential key by verifying the hash
+        for stored_key in potential_keys:
+            # Compute hash of provided key with the stored salt and iterations
+            computed_hash = hashlib.pbkdf2_hmac(
+                'sha256', 
+                api_key.encode(), 
+                stored_key.key_salt.encode(), 
+                self.PBKDF2_ITERATIONS
+            ).hex()
+            
+            # If hashes match, this is the right key
+            if computed_hash == stored_key.key_hash:
+                return stored_key
+        
+        # No matching key found
+        self.logger.warning(f"Invalid API key attempt")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )

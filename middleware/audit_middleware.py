@@ -5,6 +5,7 @@ import uuid
 import json
 import logging
 
+from models.api_key_model import APIKeyModel
 from models.audit_log_model import AuditLogModel
 from services.interfaces.audit_log_service_interface import IAuditLogService
 
@@ -24,20 +25,19 @@ class AuditMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "unknown")
-        api_key = request.headers.get("x-api-key", None)
         
         response = await call_next(request)
         
         # Get user ID from API key if possible
-        api_key_doc = None
-        if api_key:
-            api_key_doc = await self.audit_log_service.get_api_key_info(api_key)
-        user_id = api_key_doc.user_id if api_key_doc else None
+        user_id = team_id = None
+        if request.state.api_key_info:
+            user_id, team_id = request.state.api_key_info.user_id, request.state.api_key_info.team_id
         
         # Create audit log entry
         log_entry: AuditLogModel = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
+            "team_id": team_id,
             "action": method,
             "resource_type": path.split("/")[1] if len(path.split("/")) > 1 else "root",
             "resource_id": path.split("/")[2] if len(path.split("/")) > 2 else None,

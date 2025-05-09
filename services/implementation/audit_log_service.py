@@ -10,10 +10,7 @@ class AuditLogService(IAuditLogService):
     def __init__(self, repository: IRepository):
         self.logger = logging.getLogger("app")
         self.repository = repository
-    
-    async def get_api_key_info(self, key):
-        return await self.repository.api_keys.get_api_key_by_key(key)
-
+        
     async def create_audit_log(self, audit_log):
         await self.repository.audit_logs.create_audit_log(audit_log)
         return audit_log

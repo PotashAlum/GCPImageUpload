@@ -4,6 +4,7 @@ import logging
 
 from models import TeamModel, APIKeyModel, ImageModel, UserModel
 from dependencies import team_service, api_key_management_service, image_service, user_service
+from models.api_key_model import APIKeyCreateResponse
 
 # Initialize router
 router = APIRouter(prefix="/teams", tags=["Teams"])
@@ -104,21 +105,21 @@ async def delete_team_user(
 # # TEAM API KEY OPERATIONS #
 # #########################
 
-@router.post("/{team_id}/api-keys", response_model=APIKeyModel, status_code=201)
+@router.post("/{team_id}/users/{user_id}/api-keys", response_model=APIKeyCreateResponse, status_code=201)
 async def create_team_api_key(
     team_id: str = Path(..., description="Team ID"),
+    user_id: str = Path(..., description="User ID"),
     name: str = Body(..., description="API key name"),
     role: str = Body("user", description="API key role (admin or user)"),
-    user_id: Optional[str] = Body(None, description="User ID (required for user keys)")
 ):
     """
     Create a new API key for a team (admin+)
+    
+    Note: The complete API key will only be returned ONCE at creation time.
+    Store it securely as you won't be able to retrieve it later.
     """
     if role not in ["admin", "user"]:
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
-        
-    if role == "user" and not user_id:
-        raise HTTPException(status_code=400, detail="User ID is required for user API keys")
         
     return await api_key_management_service.create_api_key(name, role, user_id, team_id)
 

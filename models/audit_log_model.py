@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class AuditLogModel(BaseModel):
     id: str
     user_id: Optional[str] = None
+    team_id: Optional[str] = None
     action: str
     resource_type: str
     resource_id: Optional[str] = None
@@ -21,6 +22,7 @@ class AuditLogModel(BaseModel):
             "example": {
                 "id": "log123",
                 "user_id": "user123",
+                "team_id": "team123",
                 "action": "GET",
                 "resource_type": "image",
                 "resource_id": "img123",
