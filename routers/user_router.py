@@ -1,12 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Optional, Dict
-import uuid
-from datetime import datetime
+from fastapi import APIRouter
+from typing import List
 import logging
 
 from models import UserModel
-
-from dependencies import repository
+from dependencies import user_service
 
 # Initialize router
 router = APIRouter(prefix="/users", tags=["users"])
@@ -16,65 +13,20 @@ app_logger = logging.getLogger("app")
 
 @router.post("/", response_model=UserModel, status_code=201)
 async def create_user(username, email, team_id):
-    app_logger.info(f"Creating new user: {username}")
-    
-    # Check if team exists
-    team = await repository.teams.get_team_by_id(team_id)
-    if not team:
-        raise HTTPException(status_code=404, detail="Team not found")
-    
-    # Check if username already exists
-    if await repository.users.get_user_by_username(username):
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    # Check if email already exists
-    if await repository.users.get_user_by_email(email):
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create new user
-    user_id = str(uuid.uuid4())
-    created_at = datetime.now()
-    
-    user_db = {
-        "id": user_id,
-        "username": username,
-        "email": email,
-        "team_id": team_id,
-        "created_at": created_at
-    }
-    
-    await repository.users.create_user(user_db)
-    return {**user_db}
+    return await user_service.create_user(username, email, team_id)
 
 @router.get("/{user_id}", response_model=UserModel)
 async def get_user(user_id: str):
-    
-    user = await repository.users.get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return user
+    return await user_service.get_user(user_id)
 
 @router.get("/", response_model=List[UserModel])
 async def list_users(
     skip: int = 0, 
     limit: int = 10,
 ):
-    users = await repository.users.get_users(skip, limit)
-    return users
+    return await user_service.list_users(skip, limit)
 
 @router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: str):
-    
-    # Check if user exists
-    existing_user = await repository.users.get_user_by_id(user_id)
-    if not existing_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # First, delete all API keys associated with the user
-    await repository.api_keys.delete_user_api_keys(user_id)
-    
-    # Delete the user record
-    await repository.users.delete_user(user_id)
-    
+    await user_service.delete_user(user_id)
     return None
